@@ -96,19 +96,19 @@ static block_meta_t *find_last_entry(void) {
 
 
 void *alt_malloc(size_t size) {
-    // 1. Handle invalid size
+    //  Handle invalid size
     if (size == 0) {
         return NULL;
     }
 
-    // 2. Align the requested size to 8 bytes
+    // Align the requested size to 8 bytes
     size = ALIGN8(size);
 
-    // 3. Find the last block in our list to link the new one after it
+    // Find the last block in our list to link the new one after it
     block_meta_t *last_entry = find_last_entry();
 
-    // 4. Request new space using sbrk
-    //    (For now, we always request new space)
+    // Request new space using sbrk
+    //(For now, we always request new space)
     block_meta_t *new_block = request_space(size, last_entry);
     if (!new_block) {
         return NULL; // sbrk failed
@@ -119,9 +119,40 @@ void *alt_malloc(size_t size) {
     return (void *)(new_block + 1); // Pointer arithmetic: moves pointer by sizeof(block_meta_t)
 }
 
+//Helper function to get the metadata block from a user pointer
+// Returns NULL if ptr is invalid 
+static block_meta_t *get_block_ptr(void *ptr) {
+    if (!ptr) {
+        return NULL;
+    }
+    // The metadata block is located just BEFORE the user pointer
+    return (block_meta_t *)ptr - 1;
+}
+
 void alt_free(void *ptr) {
-    (void)ptr; // Prevent unused variable warning
-    fprintf(stderr, "alt_free not implemented yet!\n");
+    //  Handle NULL pointer
+    if (ptr == NULL) {
+        return; // Do nothing if ptr is NULL
+    }
+
+    //  Get the pointer to the metadata block
+    block_meta_t *block = get_block_ptr(ptr);
+
+    // Mark the block as free
+    //    (We'll add coalescing and mmap handling later)
+    if (block->status == STATUS_ALLOC) { // Only free sbrk-allocated blocks this way for now
+         block->status = STATUS_FREE;
+         printf("DEBUG: Marked block at %p (user ptr %p) as FREE\n", (void*)block, ptr);
+    } else if (block->status == STATUS_MAPPED) {
+        // TODO: Handle freeing mmap-ed blocks later
+        printf("DEBUG: Freeing MAPPED blocks not implemented yet.\n");
+    } else if (block->status == STATUS_FREE) {
+        // Optional: Warn about double free?
+        printf("DEBUG: Warning - block at %p (user ptr %p) already FREE.\n", (void*)block, ptr);
+    }
+
+    // Add coalescing (merging free blocks) later
+    // Add returning memory to OS (munmap/sbrk reduction) later
 }
 
 void *alt_calloc(size_t nmemb, size_t size) {

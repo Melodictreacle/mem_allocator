@@ -1,42 +1,32 @@
-#include <stdio.h>
-#include <string.h> // For strcpy
 #include "alt_mem.h"
+#include <stdio.h>
+#include <string.h>
 
 int main(void) {
-    printf("Starting memory allocator test...\n");
+  printf("Starting memory allocator test....\n");
 
-    printf("Attempting allocation 1 (100 bytes)...\n");
-    char *p1 = alt_malloc(100);
-    if (p1) {
-        printf(" -> Allocation 1 successful! Address: %p\n", p1);
-        // Try writing to the allocated memory
-        strcpy(p1, "Hello");
-        printf(" -> Wrote 'Hello' to p1.\n");
-        // Access the string through the pointer
-        printf(" -> p1 contains: %s\n", p1);
-    } else {
-        printf(" -> Allocation 1 failed.\n");
-    }
+  printf("Attempting allocation 1 (100 bytes)...\n");
+  char *p1 = alt_malloc(100);
+  if (p1) { /* */
+  } else {  /* */
+  }
+  printf("\n Attempting allocation 2 (50 bytes)\n");
+  char *p2 = alt_malloc(50);
+  if (p2) { /* */
+  } else {  /* */
+  }
 
-    printf("\nAttempting allocation 2 (50 bytes)...\n");
-    int *p2 = alt_malloc(50); // Allocate space for about 12 ints
-     if (p2) {
-        printf(" -> Allocation 2 successful! Address: %p\n", p2);
-        // Try writing some integers
-        for (int i = 0; i < 10; ++i) {
-            p2[i] = i * 10;
-        }
-        printf(" -> Wrote 10 integers to p2.\n");
-        for(int i=0;i<10;i++)
-         printf(" -> p2[%d] contains: %d\n",i,p2[i]);
-    } else {
-        printf(" -> Allocation 2 failed.\n");
-    }
+  printf("Freeing allocation 2 \n");
+  alt_free(p2);
 
-    // We still can't free memory properly yet!
-    // alt_free(p1);
-    // alt_free(p2);
+  printf("\n Attempting allocation 3 (20 bytes) after freeing \n");
+  void *p3 = alt_malloc(20);
+  if (p3) {
+    printf("Allocation 3 successful Address :%p\n", p3);
+  } else {
+    printf("Allocation 3 failed\n");
+  }
 
-    printf("\nMemory allocator test finished.\n");
-    return 0;
+  printf("\nMemory Allocator test finished\n");
+  return 0;
 }
