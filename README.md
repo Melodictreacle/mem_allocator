@@ -10,6 +10,8 @@ AltMem is a custom user-space memory allocator implemented in C. It serves as an
 - **Doubly-Linked List**: Uses a metadata header (`block_meta_t`) prepended to each block to manage free and allocated blocks.
 - **System Call Integration**: Dynamically requests heap memory from the operating system using `sbrk`.
 - **Basic Memory Operations**: Exposes functions for allocation and deallocation (`alt_malloc` and `alt_free`).
+- **Best-Fit Block Reuse**: Traverses the block list using a Best-Fit strategy to find the smallest free block that satisfies the allocation request, minimizing wasted space.
+- **Block Splitting**: Splits a reused free block if it is larger than the requested size plus metadata, reserving the remaining space for future allocations to prevent internal fragmentation.
 
 ---
 
@@ -58,9 +60,8 @@ To compile and run the included test suite, follow these steps:
 
 ## Current Implementation Status & Roadmap
 
-Currently, the allocator acts as a simple sequential heap extender. Future enhancements include:
+Currently, the allocator supports best-fit block reuse and block splitting. Future enhancements include:
 
-1. **Block Reuse**: Implement a search strategy (e.g., First-Fit or Best-Fit) to traverse the block list and reuse existing `STATUS_FREE` blocks before requesting new memory from the OS.
-2. **Coalescing**: Merge adjacent free blocks during `alt_free` to mitigate memory fragmentation.
-3. **`mmap` Support**: Use `mmap`/`munmap` instead of `sbrk` for allocations exceeding `MMAP_THRESHOLD` (128 KB) to allow releasing large chunks of memory back to the OS immediately.
-4. **API Completeness**: Fully implement `alt_calloc` and `alt_realloc`.
+1. **Coalescing**: Merge adjacent free blocks during `alt_free` to mitigate memory fragmentation.
+2. **`mmap` Support**: Use `mmap`/`munmap` instead of `sbrk` for allocations exceeding `MMAP_THRESHOLD` (128 KB) to allow releasing large chunks of memory back to the OS immediately.
+3. **API Completeness**: Fully implement `alt_calloc` and `alt_realloc`.

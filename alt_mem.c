@@ -1,6 +1,7 @@
 #include "alt_mem.h"
 
 #include <stdbool.h>  // For bool type
+#include <stddef.h>
 #include <stdio.h>    // For perror
 #include <stdlib.h>   // For exit, EXIT_FAILURE
 #include <string.h>   // For memset, memcpy
@@ -131,6 +132,29 @@ void *alt_malloc(size_t size) {
         "DEBUG: Found suitable free block at %p (size %zu) for request %zu\n",
         (void *)best_block, best_block->size, size);
     // implement block splitting later if best block size > size
+    
+    size_t remaining_size=best_block->size-size;
+    if(remaining_size >=sizeof(block_meta_t)+ALIGN8(1)){
+        printf("DEBUG: Splitting the block .Remaining size : %zu\n",remaining_size);
+
+        block_meta_t *new_free_block=(block_meta_t*)((char*)(best_block+1)+size);
+        new_free_block->size=remaining_size-sizeof(block_meta_t);
+        new_free_block->status=STATUS_FREE;
+
+        //update next/prev pointer 
+        new_free_block->next=best_block->next;
+        new_free_block->prev=best_block;
+
+        if(best_block->next){
+            best_block->next->prev=new_free_block;
+        }
+        best_block->next=new_free_block;
+
+        best_block->size=size;
+
+    }else {
+        printf("DEBUG: Not enough space to split block. Allocating entire block (%zu bytes).\n", best_block->size);
+    }
 
     best_block->status = STATUS_ALLOC;
     return (void *)(best_block + 1);
@@ -144,7 +168,7 @@ void *alt_malloc(size_t size) {
     if (!new_block) {
       return NULL; // sbrk failed
     }
-    
+
     // Return the pointer to the user data area
     //     This is right *after* our metadata block
 
