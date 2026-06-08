@@ -218,6 +218,55 @@ static size_t min(size_t a, size_t b) {
     return (a < b) ? a : b;
 }
 
+// leak detection
+
+//  alt_check_leaks() is registered as a destructor so it fires automatically
+//  after main() returns (and after all atexit handlers), requiring zero  call-site changes. 
+//  Every allocation records a block_meta_t header immediately before the
+//  returned user pointer.  Every alt_free() either sets status → STATUS_FREE
+//  (sbrk blocks) or calls munmap and unlinks the node (mmap blocks).
+//  Therefore, at exit time, any block still reachable via head→next→…  with
+//  status STATUS_ALLOC or STATUS_MAPPED is a live (leaked) allocation.
+//  The detector walks that list once — no shadow map, no hash table, no
+//  extra per-call overhead.
+ 
+// Output goes to stderr so it always appears last, after stdout is flushed.
+ 
+static void alt_check_leaks(void) __attribute__((destructor));
+static void alt_check_leaks(void)
+{
+    block_meta_t *current    = head;
+    size_t        leak_count = 0;
+    size_t        leak_bytes = 0;
+
+    fprintf(stderr, "\n=== AltMem Leak Report ===\n");
+
+    while (current) {
+        if (current->status == STATUS_ALLOC || current->status == STATUS_MAPPED) {
+            leak_count++;
+            leak_bytes += current->size;
+
+            const char *kind = (current->status == STATUS_MAPPED) ? "mmap" : "sbrk";
+            fprintf(stderr,
+                    "  LEAK [%s]  user ptr: %p  size: %zu bytes\n",
+                    kind,
+                    (void *)(current + 1),
+                    current->size);
+        }
+        current = current->next;
+    }
+
+    if (leak_count == 0) {
+        fprintf(stderr, "  No leaks detected. All allocations were freed.\n");
+    } else {
+        fprintf(stderr,
+                "\nSummary: %zu leak(s), %zu byte(s) total not freed.\n",
+                leak_count, leak_bytes);
+    }
+
+}
+
+
 // main functions
 
 void *alt_malloc(size_t size) {

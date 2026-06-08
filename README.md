@@ -14,6 +14,7 @@ AltMem is a custom user-space memory allocator implemented in C. It serves as an
 - **Block Splitting**: Splits a reused free block if it is larger than the requested size plus metadata, reserving the remaining space for future allocations to prevent internal fragmentation.
 - **Coalescing (Block Merging)**: Automatically merges adjacent free blocks (both forward and backward) during `alt_free` to combat memory fragmentation.
 - **`mmap` Support**: Large allocations (>= 128 KiB) bypass the custom `sbrk` heap and are allocated directly from the OS using anonymous virtual memory mapping (`mmap`). When freed, these blocks are immediately released back to the OS using `munmap`.
+- **Automatic Leak Detection**: Includes a built-in leak detector (`alt_check_leaks`) registered via `__attribute__((destructor))` that automatically fires when the program exits, scanning the allocation linked list and reporting any unfreed block sizes and addresses to `stderr`.
 
 ---
 
@@ -76,3 +77,4 @@ The allocator is fully implemented and complete. It supports:
 - Automatic coalescing (merging) of adjacent free blocks to prevent fragmentation.
 - Transparent `mmap` redirection for allocations larger than 128 KiB.
 - Complete C standard library equivalent memory allocator API including: `alt_malloc`, `alt_free`, `alt_calloc`, and `alt_realloc`.
+- Automatic leak detection running via a destructor at program exit.
