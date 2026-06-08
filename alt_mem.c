@@ -213,6 +213,11 @@ static void *map_memory(size_t size, block_meta_t *last_entry) {
     return (void *)(block + 1);
 }
 
+// Helper for min
+static size_t min(size_t a, size_t b) {
+    return (a < b) ? a : b;
+}
+
 // main functions
 
 void *alt_malloc(size_t size) {
@@ -366,8 +371,129 @@ void *alt_calloc(size_t nmemb, size_t size) {
 }
 
 void *alt_realloc(void *ptr, size_t size) {
-  (void)ptr;
-  (void)size; // Prevent unused variable warnings
-  fprintf(stderr, "alt_realloc not implemented yet!\n");
-  return NULL;
+    // Handle edge cases: ptr is NULL or size is 0
+    if (ptr == NULL) {
+        return alt_malloc(size); // Behaves like malloc
+    }
+    if (size == 0) {
+        alt_free(ptr); // Behaves like free
+        return NULL;
+    }
+
+    // Get metadata and align new size
+    block_meta_t *block = get_block_ptr(ptr);
+    size_t new_size = ALIGN8(size);
+    size_t old_size = block->size; // Current usable size
+
+     printf("DEBUG realloc: ptr=%p, old_size=%zu, new_size=%zu, status=%d\n",
+           ptr, old_size, new_size, block->status);
+
+    // Sanity check: Cannot realloc a free block
+    if (block->status == STATUS_FREE) {
+        fprintf(stderr, "Error: Attempting to realloc a freed block at %p\n", ptr);
+        return NULL; // Or abort, depending on desired strictness
+    }
+
+    // Handle STATUS_MAPPED blocks
+    if (block->status == STATUS_MAPPED) {
+        printf("DEBUG realloc: Block is MAPPED.\n");
+        if (new_size == old_size) {
+            return ptr; // Size is the same, do nothing
+        }
+        // Allocate new, copy, free old for mmap realloc
+        void *new_ptr = alt_malloc(new_size); // Will use mmap if new_size is large
+        if (!new_ptr) return NULL; // Allocation failed
+        memcpy(new_ptr, ptr, min(new_size, old_size));
+        alt_free(ptr); // Frees the original mmap block
+        return new_ptr;
+    }
+
+    //  Handle STATUS_ALLOC (sbrk) blocks
+
+    //  Handle Shrinking
+    if (new_size <= old_size) {
+        printf("DEBUG realloc: Shrinking block (or size unchanged).\n");
+        // Try to split if significant space is saved
+        size_t diff = old_size - new_size;
+        if (diff >= sizeof(block_meta_t) + ALIGN8(1)) {
+            printf("DEBUG realloc: Splitting block during shrink.\n");
+            // Create the new free block for the remainder
+            block_meta_t *new_free_block = (block_meta_t *)((char *)(block + 1) + new_size);
+            new_free_block->size = diff - sizeof(block_meta_t);
+            new_free_block->status = STATUS_FREE;
+
+            // Link it in
+            new_free_block->next = block->next;
+            new_free_block->prev = block;
+            if (block->next) block->next->prev = new_free_block;
+            block->next = new_free_block;
+
+            // Update original block's size
+            block->size = new_size;
+
+            // Coalesce the newly created free block with its *next* neighbor if possible
+            join_free_blocks(new_free_block);
+        } else {
+             printf("DEBUG realloc: Not enough space saved to split block during shrink.\n");
+             // Keep the block as is (internal fragmentation)
+        }
+        return ptr; // Return original pointer (data is still valid at the start)
+    }
+
+    // Handle Growing
+    printf("DEBUG realloc: Growing block.\n");
+
+    //  Check if next block is free and physically adjacent and large enough
+    if (block->next && block->next->status == STATUS_FREE &&
+        (char *)block + sizeof(block_meta_t) + old_size == (char *)block->next)
+    {
+        size_t combined_size = old_size + sizeof(block_meta_t) + block->next->size;
+         printf("DEBUG realloc: Next block (%p, size %zu) is FREE and adjacent.\n",
+               (void*)block->next, block->next->size);
+        if (combined_size >= new_size) {
+             printf("DEBUG realloc: Coalescing with next block to grow.\n");
+            // Merge block->next into block
+            block->size = combined_size; // New size is the combined payload
+            block_meta_t* next_next = block->next->next; // Save pointer
+            block->next = next_next;     // Unlink the absorbed block
+            if (next_next) next_next->prev = block;
+
+            // Check if we have excess space after merging, try to split again
+            size_t excess = block->size - new_size;
+            if (excess >= sizeof(block_meta_t) + ALIGN8(1)) {
+                 printf("DEBUG realloc: Splitting after growing via coalesce.\n");
+                block_meta_t *new_free_block = (block_meta_t *)((char *)(block + 1) + new_size);
+                new_free_block->size = excess - sizeof(block_meta_t);
+                new_free_block->status = STATUS_FREE;
+
+                new_free_block->next = block->next;
+                new_free_block->prev = block;
+                if(block->next) block->next->prev = new_free_block;
+                block->next = new_free_block;
+                block->size = new_size; // Set block size accurately
+
+                // No need to call join_free_blocks here, as we just created it from merged space
+            }
+             printf("DEBUG realloc: Growth successful via coalesce. New size: %zu\n", block->size);
+            return ptr; // Return original pointer
+        } else {
+             printf("DEBUG realloc: Next free block not large enough (%zu needed, %zu available)\n",
+                   new_size - old_size, sizeof(block_meta_t) + block->next->size);
+        }
+    } else {
+         printf("DEBUG realloc: Next block (%p) is not suitable for merge (status=%d, adjacent check failed?).\n",
+               (void*)block->next, block->next ? block->next->status : -1);
+    }
+
+    //  (Skipping sbrk extension optimization)
+
+    //  Allocate new block, copy data, free old block
+    printf("DEBUG realloc: Cannot grow in place. Allocating new block, copying, freeing old.\n");
+    void *new_ptr = alt_malloc(new_size);
+    if (!new_ptr) {
+        return NULL; // Allocation failed
+    }
+    memcpy(new_ptr, ptr, old_size); // Copy original data
+    alt_free(ptr);                  // Free the old block
+    return new_ptr;
 }

@@ -41,8 +41,15 @@ Allocates zero-initialized memory for an array of `nmemb` elements, each of `siz
 - **Returns**: A pointer to the zero-initialized user payload space, or `NULL` if allocation fails (including due to multiplication overflow).
 - **Details**: Computes the total size as `nmemb * size` and checks for integer overflow. Aligns the size to an 8-byte multiple. If the size is less than 128 KiB, it allocates memory using `sbrk` (applying best-fit search, block splitting, or heap extension) and zeroes the payload memory with `memset`. For size 128 KiB or larger, it requests zero-initialized memory from the OS using `mmap`.
 
-### `void *alt_realloc(void *ptr, size_t size)` *(Planned)*
+### `void *alt_realloc(void *ptr, size_t size)`
 Resizes the memory block pointed to by `ptr` to `size` bytes.
+- **Returns**: A pointer to the resized memory block, or `NULL` if resizing fails.
+- **Details**:
+  - **Edge Cases**: If `ptr` is `NULL`, it acts as `alt_malloc(size)`. If `size` is 0, it acts as `alt_free(ptr)` and returns `NULL`.
+  - **Mmapped Blocks**: Allocates a new block, copies the data (minimum of old/new sizes), and frees the original mapped block.
+  - **Sbrk Blocks**:
+    - **Shrinking**: If the requested size is smaller, it shrinks in-place. If the freed space is large enough to contain block metadata plus aligned payload, the block is split, and the remainder is freed and coalesced forward.
+    - **Growing**: It checks if the adjacent next block in memory is free. If so, and the combined size is sufficient, it grows in-place by coalescing with that next block (splitting any excess remainder). If growing in-place is not possible, it allocates a new block, copies the data, and frees the old block.
 
 ---
 
@@ -62,8 +69,10 @@ To compile and run the included test suite, follow these steps:
 
 ---
 
-## Current Implementation Status & Roadmap
+## Current Implementation Status
 
-Currently, the allocator supports best-fit block reuse, block splitting, coalescing of adjacent free blocks, `mmap` support for large allocations, and zero-initialized allocation (`alt_calloc`). Future enhancements include:
-
-1. **API Completeness**: Fully implement `alt_realloc`.
+The allocator is fully implemented and complete. It supports:
+- Best-fit block reuse and splitting for heap allocations (`sbrk`).
+- Automatic coalescing (merging) of adjacent free blocks to prevent fragmentation.
+- Transparent `mmap` redirection for allocations larger than 128 KiB.
+- Complete C standard library equivalent memory allocator API including: `alt_malloc`, `alt_free`, `alt_calloc`, and `alt_realloc`.
