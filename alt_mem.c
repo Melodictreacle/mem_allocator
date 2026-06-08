@@ -239,7 +239,7 @@ static void alt_check_leaks(void)
     size_t        leak_count = 0;
     size_t        leak_bytes = 0;
 
-    fprintf(stderr, "\n=== AltMem Leak Report ===\n");
+    fprintf(stderr, "AltMem Leak Report\n");
 
     while (current) {
         if (current->status == STATUS_ALLOC || current->status == STATUS_MAPPED) {
