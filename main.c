@@ -2,44 +2,38 @@
 #include <string.h>
 #include "alt_mem.h"
 
+#define LARGE_ALLOC_SIZE (200 * 1024) // Larger than MMAP_THRESHOLD
+
 int main(void) {
     printf("Starting memory allocator test...\n");
 
-    printf("\n[Test 1: Allocate Three Adjacent Blocks]\n");
-    char *a = alt_malloc(100); printf("a (%p) alloc 100\n", a);
-    char *b = alt_malloc(120); printf("b (%p) alloc 120\n", b);
-    char *c = alt_malloc(150); printf("c (%p) alloc 150\n", c);
+    printf("\n[Test 1: Small Allocations (sbrk)]\n");
+    void *s1 = alt_malloc(100); printf("s1 (%p) alloc 100\n", s1);
+    void *s2 = alt_malloc(200); printf("s2 (%p) alloc 200\n", s2);
 
-    printf("\n[Test 2: Free Middle Block - No Coalesce]\n");
-    printf("Freeing b (%p)...\n", b);
-    alt_free(b); // Should just mark b as free
+    printf("\n[Test 2: Large Allocation (mmap)]\n");
+    void *m1 = alt_malloc(LARGE_ALLOC_SIZE);
+    printf("m1 (%p) alloc %d (large)\n", m1, LARGE_ALLOC_SIZE);
 
-    printf("\n[Test 3: Free First Block - Coalesce Forward]\n");
-    printf("Freeing a (%p)...\n", a);
-    alt_free(a); // Should mark a free, then merge a and b
+    printf("\n[Test 3: Another Small Allocation (sbrk)]\n");
+    // Should still use sbrk, potentially reusing if s1/s2 freed, or extending heap
+    void *s3 = alt_malloc(150); printf("s3 (%p) alloc 150\n", s3);
 
-    printf("\n[Test 4: Allocate to Test Forward Coalesce]\n");
-    // Original sizes: a=100, b=120. Meta size ~24.
-    // Merged free block should be around 100 + 120 + 24 = 244 bytes.
-    printf("Allocating d (220 bytes)...\n");
-    char *d = alt_malloc(220); // Should fit in the merged a+b block and split
-    printf("d (%p) alloc 220. Should reuse merged a+b block.\n", d);
-    alt_free(d); // Free it for next test
+    printf("\n[Test 4: Freeing Large Allocation]\n");
+    printf("Freeing m1 (%p)...\n", m1);
+    alt_free(m1); // Should trigger munmap
 
-    printf("\n[Test 5: Free Last Block - Coalesce Backward]\n");
-    // State: Merged a+b (free), c (alloc)
-    printf("Freeing c (%p)...\n", c);
-    alt_free(c); // Should mark c free, then merge (a+b) with c.
+    printf("\n[Test 5: Freeing Small Allocations]\n");
+    printf("Freeing s1 (%p)...\n", s1); alt_free(s1);
+    printf("Freeing s2 (%p)...\n", s2); alt_free(s2); // Should coalesce with s1 if adjacent
+    printf("Freeing s3 (%p)...\n", s3); alt_free(s3); // Should coalesce if adjacent
 
-    printf("\n[Test 6: Allocate to Test Full Coalesce]\n");
-    // Merged block should be ~ 100 + 120 + 150 + 2*meta = 370 + 48 = 418
-    printf("Allocating e (400 bytes)...\n");
-    char *e = alt_malloc(400); // Should fit in the fully merged block
-    printf("e (%p) alloc 400. Should reuse fully merged block.\n", e);
+    printf("\n[Test 6: Large Allocation Again]\n");
+    // Should use mmap again, likely at a different address than before
+    void *m2 = alt_malloc(LARGE_ALLOC_SIZE);
+    printf("m2 (%p) alloc %d (large)\n", m2, LARGE_ALLOC_SIZE);
+    alt_free(m2);
 
-    printf("\n[Test 7: Clean up]\n");
-    alt_free(e);
-    printf("Freed e.\n");
 
     printf("\nMemory allocator test finished.\n");
     return 0;

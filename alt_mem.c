@@ -54,6 +54,8 @@ static block_meta_t *head = NULL;
 // Flag to track if we've done the initial large allocation
 static bool preallocated = false;
 
+// Helper functions
+
 // Helper function to request memory from the OS using sbrk
 // Returns a pointer to the new block's metadata, or NULL on failure
 static block_meta_t *request_space(size_t size, block_meta_t *last_entry) {
@@ -79,6 +81,16 @@ static block_meta_t *request_space(size_t size, block_meta_t *last_entry) {
   }
 
   return block;
+}
+
+// Helper function to get the metadata block from a user pointer
+//  Returns NULL if ptr is invalid
+static block_meta_t *get_block_ptr(void *ptr) {
+  if (!ptr) {
+    return NULL;
+  }
+  // The metadata block is located just BEFORE the user pointer
+  return (block_meta_t *)ptr - 1;
 }
 
 // Helper function to find the last block in our linked list
@@ -167,73 +179,86 @@ static void join_free_blocks(block_meta_t *block) {
      printf("DEBUG: Coalescing finished.\n");
 }
 
-void *alt_malloc(size_t size) {
-  //  Handle invalid size
-  if (size == 0) {
-    return NULL;
-  }
+// Map memory using mmap for large allocations
+// Returns pointer to user data area, or NULL on failure
+static void *map_memory(size_t size, block_meta_t *last_entry) {
+    // Request size + metadata space.
+    // MAP_ANONYMOUS: Memory not backed by a file, initialized to zero.
+    // MAP_PRIVATE: Modifications are private to this process.
+    block_meta_t *block = mmap(NULL, // Let kernel choose address
+                             sizeof(block_meta_t) + size,
+                             PROT_READ | PROT_WRITE, // Permissions
+                             MAP_PRIVATE | MAP_ANONYMOUS,
+                             -1, // File descriptor (none for anonymous)
+                             0); // Offset (0 for anonymous)
 
-  // Align the requested size to 8 bytes
-  size = ALIGN8(size);
+    DIE(block == MAP_FAILED, "mmap failed"); // Check for error
 
-  block_meta_t *best_block = find_best_fit(size);
-  if (best_block) {
-    printf(
-        "DEBUG: Found suitable free block at %p (size %zu) for request %zu\n",
-        (void *)best_block, best_block->size, size);
-    // implement block splitting later if best block size > size
-    
-    size_t remaining_size=best_block->size-size;
-    if(remaining_size >=sizeof(block_meta_t)+ALIGN8(1)){
-        printf("DEBUG: Splitting the block .Remaining size : %zu\n",remaining_size);
+    // Initialize metadata
+    block->size = size;
+    block->status = STATUS_MAPPED; // Mark as mmap-ed
+    block->next = NULL;
+    block->prev = last_entry;
 
-        block_meta_t *new_free_block=(block_meta_t*)((char*)(best_block+1)+size);
-        new_free_block->size=remaining_size-sizeof(block_meta_t);
-        new_free_block->status=STATUS_FREE;
-
-        //update next/prev pointer 
-        new_free_block->next=best_block->next;
-        new_free_block->prev=best_block;
-
-        if(best_block->next){
-            best_block->next->prev=new_free_block;
-        }
-        best_block->next=new_free_block;
-
-        best_block->size=size;
-
-    }else {
-        printf("DEBUG: Not enough space to split block. Allocating entire block (%zu bytes).\n", best_block->size);
+    // Link into the list
+    if (last_entry) {
+        last_entry->next = block;
+    } else {
+        head = block; // First block overall
     }
+    printf("DEBUG: Mapped new block at %p (size %zu) for request %zu\n",
+           (void*)block, size, size);
 
-    best_block->status = STATUS_ALLOC;
-    return (void *)(best_block + 1);
-  } else {
-    // Find the last block in our list to link the new one after it
-    block_meta_t *last_entry = find_last_entry();
-
-    // Request new space using sbrk
-    //(For now, we always request new space)
-    block_meta_t *new_block = request_space(size, last_entry);
-    if (!new_block) {
-      return NULL; // sbrk failed
-    }
-
-    // Return the pointer to the user data area
-    //     This is right *after* our metadata block
-
-    return (void *)(new_block +1); // Pointer arithmetic: moves pointer by sizeof(block_meta_t)
-  }
+    // Return pointer to user data area
+    return (void *)(block + 1);
 }
 
-// Helper function to get the metadata block from a user pointer
-//  Returns NULL if ptr is invalid
-static block_meta_t *get_block_ptr(void *ptr) {
-  if (!ptr) {
-    return NULL;
-  }
-  // The metadata block is located just BEFORE the user pointer
-  return (block_meta_t *)ptr - 1;
+// main functions
+
+void *alt_malloc(size_t size) {
+    // Handle invalid size
+    if (size == 0) {
+        return NULL;
+    }
+
+    //Align the requested size
+    size = ALIGN8(size);
+
+    // Check for large allocation 
+    if (size >= MMAP_THRESHOLD) {
+        printf("DEBUG: Request size %zu >= threshold %d. Using mmap.\n", size, MMAP_THRESHOLD);
+        block_meta_t *last_entry = find_last_entry(); // Still need last entry to link
+        return map_memory(size, last_entry);
+    }
+
+    //  If size < MMAP_THRESHOLD, proceed with sbrk logic
+
+    //Search for a suitable free block (Best-Fit)
+    block_meta_t *best_block = find_best_fit(size); // find_best_fit ignores MAPPED blocks
+
+    if (best_block) {
+        // Block splitting logic remains the same
+        printf("DEBUG: Found suitable free block at %p (size %zu) for request %zu\n",
+               (void*)best_block, best_block->size, size);
+
+        size_t remaining_size = best_block->size - size;
+        if (remaining_size >= sizeof(block_meta_t) + ALIGN8(1)) {
+             printf("DEBUG: Splitting block...\n");
+             // split logic
+        } else {
+             printf("DEBUG: Not enough space to split...\n");
+        }
+        best_block->status = STATUS_ALLOC;
+        return (void *)(best_block + 1);
+
+    } else {
+        //  No Suitable fre sbrk Block Found 
+        printf("DEBUG: No suitable free block found. Requesting new space via sbrk.\n");
+        block_meta_t *last_entry = find_last_entry();
+        block_meta_t *new_block = request_space(size, last_entry); // request_space uses sbrk
+        if (!new_block) return NULL;
+        return (void *)(new_block + 1);
+    }
 }
 
 void alt_free(void *ptr) {
@@ -244,13 +269,34 @@ void alt_free(void *ptr) {
     block_meta_t *block = get_block_ptr(ptr);
 
     if (block->status == STATUS_ALLOC) {
+        // --- Freeing sbrk block ---
         block->status = STATUS_FREE;
-        printf("DEBUG: Marked block at %p (user ptr %p) as FREE\n", (void*)block, ptr);
-        // *** Call coalesce here ***
-        join_free_blocks(block);
+        printf("DEBUG: Marked sbrk block at %p (user ptr %p, size %zu) as FREE\n",
+               (void*)block, ptr, block->size);
+        join_free_blocks(block); // Coalesce sbrk blocks
+
     } else if (block->status == STATUS_MAPPED) {
-        // TODO: Handle freeing mmap-ed blocks later
-        printf("DEBUG: Freeing MAPPED blocks not implemented yet.\n");
+        //  Freeing mmap block 
+         printf("DEBUG: Freeing MAPPED block at %p (user ptr %p, size %zu) using munmap\n",
+               (void*)block, ptr, block->size);
+
+        // Unlink the block from the list
+        if (block->prev) {
+            block->prev->next = block->next;
+        } else {
+            // Block was the head of the list
+            head = block->next;
+        }
+        if (block->next) {
+            block->next->prev = block->prev;
+        }
+
+        // Release memory back to the OS
+        // We need to unmap the metadata AND the user data area
+        size_t total_size = sizeof(block_meta_t) + block->size;
+        int ret = munmap(block, total_size);
+        DIE(ret == -1, "munmap failed");
+
     } else if (block->status == STATUS_FREE) {
         printf("DEBUG: Warning - block at %p (user ptr %p) already FREE.\n", (void*)block, ptr);
     }
