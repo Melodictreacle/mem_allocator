@@ -303,10 +303,66 @@ void alt_free(void *ptr) {
 }
 
 void *alt_calloc(size_t nmemb, size_t size) {
-  (void)nmemb;
-  (void)size; // Prevent unused variable warnings
-  fprintf(stderr, "alt_calloc not implemented yet!\n");
-  return NULL;
+    // Calculate total size and check for overflow / zero request
+    size_t total_size = nmemb * size;
+    if (nmemb == 0 || size == 0 || total_size / nmemb != size) { // Check for overflow
+        return NULL;
+    }
+
+    // Align the total size
+    total_size = ALIGN8(total_size);
+
+    //  Decide between mmap and sbrk based on threshold
+    void *ptr = NULL;
+    if (total_size >= MMAP_THRESHOLD) {
+        printf("DEBUG calloc: Request size %zu >= threshold. Using mmap.\n", total_size);
+        block_meta_t *last_entry = find_last_entry();
+        ptr = map_memory(total_size, last_entry);
+        // mmap anonymous memory is already zeroed by the kernel
+        if (!ptr) return NULL; // map_memory failed
+
+    } else {
+        printf("DEBUG calloc: Request size %zu < threshold. Using sbrk logic.\n", total_size);
+        // Use the same logic as alt_malloc for finding/allocating sbrk blocks
+        block_meta_t *block = find_best_fit(total_size);
+        if (block) {
+            // Found a free block
+            printf("DEBUG calloc: Found suitable free block at %p\n", (void*)block);
+             // Split if necessary (same logic as malloc)
+            size_t remaining_size = block->size - total_size;
+             if (remaining_size >= sizeof(block_meta_t) + ALIGN8(1)) {
+                printf("DEBUG calloc: Splitting block.\n");
+                block_meta_t *new_free_block = (block_meta_t *)((char *)(block + 1) + total_size);
+                new_free_block->size = remaining_size - sizeof(block_meta_t);
+                new_free_block->status = STATUS_FREE;
+                new_free_block->next = block->next;
+                new_free_block->prev = block;
+                if (block->next) block->next->prev = new_free_block;
+                block->next = new_free_block;
+                block->size = total_size;
+            } else {
+                 printf("DEBUG calloc: Not splitting block.\n");
+            }
+            block->status = STATUS_ALLOC;
+            ptr = (void *)(block + 1);
+
+        } else {
+            // No free block, request new space
+             printf("DEBUG calloc: No suitable free block. Requesting new space via sbrk.\n");
+            block_meta_t *last_entry = find_last_entry();
+            block = request_space(total_size, last_entry);
+            if (!block) return NULL; // sbrk failed
+            ptr = (void *)(block + 1);
+        }
+
+        // Zero the memory for sbrk allocations
+        if (ptr) {
+             printf("DEBUG calloc: Zeroing %zu bytes for sbrk allocation at %p\n", total_size, ptr);
+            memset(ptr, 0, total_size);
+        }
+    }
+
+    return ptr;
 }
 
 void *alt_realloc(void *ptr, size_t size) {

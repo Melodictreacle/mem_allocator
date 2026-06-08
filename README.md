@@ -36,8 +36,10 @@ Allocates `size` bytes of memory.
 Frees the memory space pointed to by `ptr`.
 - **Details**: Retrieves the metadata block preceding the user pointer. If the block was allocated via `sbrk` (marked as `STATUS_ALLOC`), it marks its status as `STATUS_FREE` and coalesces adjacent free blocks. If it was allocated via `mmap` (marked as `STATUS_MAPPED`), it unmaps the memory using `munmap` and updates the block list. If `ptr` is `NULL`, no action is taken.
 
-### `void *alt_calloc(size_t nmemb, size_t size)` *(Planned)*
+### `void *alt_calloc(size_t nmemb, size_t size)`
 Allocates zero-initialized memory for an array of `nmemb` elements, each of `size` bytes.
+- **Returns**: A pointer to the zero-initialized user payload space, or `NULL` if allocation fails (including due to multiplication overflow).
+- **Details**: Computes the total size as `nmemb * size` and checks for integer overflow. Aligns the size to an 8-byte multiple. If the size is less than 128 KiB, it allocates memory using `sbrk` (applying best-fit search, block splitting, or heap extension) and zeroes the payload memory with `memset`. For size 128 KiB or larger, it requests zero-initialized memory from the OS using `mmap`.
 
 ### `void *alt_realloc(void *ptr, size_t size)` *(Planned)*
 Resizes the memory block pointed to by `ptr` to `size` bytes.
@@ -62,6 +64,6 @@ To compile and run the included test suite, follow these steps:
 
 ## Current Implementation Status & Roadmap
 
-Currently, the allocator supports best-fit block reuse, block splitting, coalescing of adjacent free blocks, and `mmap` support for large allocations. Future enhancements include:
+Currently, the allocator supports best-fit block reuse, block splitting, coalescing of adjacent free blocks, `mmap` support for large allocations, and zero-initialized allocation (`alt_calloc`). Future enhancements include:
 
-1. **API Completeness**: Fully implement `alt_calloc` and `alt_realloc`.
+1. **API Completeness**: Fully implement `alt_realloc`.

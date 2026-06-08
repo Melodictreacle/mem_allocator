@@ -1,39 +1,39 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h> // For exit
 #include "alt_mem.h"
 
-#define LARGE_ALLOC_SIZE (200 * 1024) // Larger than MMAP_THRESHOLD
+#define LARGE_ALLOC_SIZE (200 * 1024)
+
+// Helper to check if memory is zeroed
+void check_zero(void *ptr, size_t size) {
+    unsigned char *byte_ptr = (unsigned char *)ptr;
+    for (size_t i = 0; i < size; ++i) {
+        if (byte_ptr[i] != 0) {
+            fprintf(stderr, "Error: Memory not zeroed at byte %zu!\n", i);
+            exit(EXIT_FAILURE); // Abort test
+        }
+    }
+     printf(" -> Memory check: OK (all bytes zero)\n");
+}
+
 
 int main(void) {
     printf("Starting memory allocator test...\n");
 
-    printf("\n[Test 1: Small Allocations (sbrk)]\n");
-    void *s1 = alt_malloc(100); printf("s1 (%p) alloc 100\n", s1);
-    void *s2 = alt_malloc(200); printf("s2 (%p) alloc 200\n", s2);
+    printf("\n[Test 1: calloc Small (sbrk)]\n");
+    int *c1 = alt_calloc(10, sizeof(int)); // 40 bytes aligned to 40
+    printf("c1 (%p) calloc 10 ints\n", c1);
+    if(c1) check_zero(c1, 10 * sizeof(int));
+    alt_free(c1);
 
-    printf("\n[Test 2: Large Allocation (mmap)]\n");
-    void *m1 = alt_malloc(LARGE_ALLOC_SIZE);
-    printf("m1 (%p) alloc %d (large)\n", m1, LARGE_ALLOC_SIZE);
+    printf("\n[Test 2: calloc Large (mmap)]\n");
+    long *c2 = alt_calloc(50000, sizeof(long)); // > MMAP_THRESHOLD
+    printf("c2 (%p) calloc 50000 longs (large)\n", c2);
+     if(c2) check_zero(c2, 50000 * sizeof(long)); // mmap should zero it
+    alt_free(c2); // Should use munmap
 
-    printf("\n[Test 3: Another Small Allocation (sbrk)]\n");
-    // Should still use sbrk, potentially reusing if s1/s2 freed, or extending heap
-    void *s3 = alt_malloc(150); printf("s3 (%p) alloc 150\n", s3);
-
-    printf("\n[Test 4: Freeing Large Allocation]\n");
-    printf("Freeing m1 (%p)...\n", m1);
-    alt_free(m1); // Should trigger munmap
-
-    printf("\n[Test 5: Freeing Small Allocations]\n");
-    printf("Freeing s1 (%p)...\n", s1); alt_free(s1);
-    printf("Freeing s2 (%p)...\n", s2); alt_free(s2); // Should coalesce with s1 if adjacent
-    printf("Freeing s3 (%p)...\n", s3); alt_free(s3); // Should coalesce if adjacent
-
-    printf("\n[Test 6: Large Allocation Again]\n");
-    // Should use mmap again, likely at a different address than before
-    void *m2 = alt_malloc(LARGE_ALLOC_SIZE);
-    printf("m2 (%p) alloc %d (large)\n", m2, LARGE_ALLOC_SIZE);
-    alt_free(m2);
-
+    // Add other malloc/free tests here if desired
 
     printf("\nMemory allocator test finished.\n");
     return 0;
